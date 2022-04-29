@@ -43,7 +43,7 @@ stages:
   displayName: Deploy to Dev
   dependsOn: Build
   variables:
-    arcsecret: arcflagsecret
+    arcsecret: k8ssecretoarc
   jobs:
   - job: Deploy
     displayName: DeploytoAKS
