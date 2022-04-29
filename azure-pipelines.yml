@@ -1,0 +1,78 @@
+
+trigger:
+- main
+
+resources:
+- repo: self
+## Multi Use varibiels through the pipline
+variables:
+  imageRepo: myflagacr3210
+  tag: '$(Build.BuildId)'
+## Build the image on ubunto host VM
+stages:
+- stage: Build
+  displayName: Build image
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      vmImage: ubuntu-latest
+  
+  ## Build the image from the Docker file in the corrent directory in github , and then push the image to the ACR in azure (with the variable acr name)
+    steps:
+    - task: Docker@2
+      displayName: Build an image
+      inputs:
+        containerRegistry: 'flagACR'
+        repository: '$(imageRepo)'
+        command: 'buildAndPush'
+        Dockerfile: '$(Build.SourcesDirectory)/app/Dockerfile'
+        tags: |
+          $(tag)
+          latest
+
+    ## Publish the artifacts (kubernetes service and deployment yamls) from the source directory
+    - task: PublishPipelineArtifact@1
+      inputs:
+        targetPath: '$(Pipeline.Workspace)/s/kubernetes'
+        artifact: 'manifests'
+        publishLocation: 'pipeline'
+        
+  ## Deploy stage on ubunto host VM
+- stage: Deploy
+  displayName: Deploy to Dev
+  dependsOn: Build
+  variables:
+    arcsecret: arcflagsecret
+  jobs:
+  - job: Deploy
+    displayName: DeploytoAKS
+    pool:
+      vmImage: ubuntu-latest
+    ## Download the artifacts from publish artifiacts stage named "artifacts" and saved it in temp folder named manifests
+    steps:
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        buildType: 'current'
+        artifactName: 'manifests'
+        targetPath: '$(Pipeline.Workspace)/manifests'
+    - task: KubernetesManifest@0
+      inputs:
+        action: 'createSecret'
+        kubernetesServiceConnection: 'flagaks'
+        namespace: 'default'
+        secretType: 'dockerRegistry'
+        secretName: '($arcsecret)'
+        dockerRegistryEndpoint: 'flagACR'
+    
+    ## deploy the yaml kubernetes files with the use of the artifacts
+    - task: KubernetesManifest@0
+      inputs:
+        action: 'deploy'
+        kubernetesServiceConnection: 'flagaks'
+        namespace: 'default'
+        manifests: |
+          $(Pipeline.Workspace)/manifests/deployment.yml
+          $(Pipeline.Workspace)/manifests/service.yml
+
+
