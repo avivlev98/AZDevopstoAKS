@@ -29,7 +29,6 @@ stages:
         Dockerfile: '$(Build.SourcesDirectory)/app/Dockerfile'
         tags: |
           $(tag)
-          latest
 
     ## Publish the artifacts (kubernetes service and deployment yamls) from the source directory
     - task: PublishPipelineArtifact@1
@@ -38,41 +37,64 @@ stages:
         artifact: 'manifests'
         publishLocation: 'pipeline'
         
+        
   ## Deploy stage on ubunto host VM
 - stage: Deploy
   displayName: Deploy to Dev
   dependsOn: Build
   variables:
     arcsecret: k8ssecretforacrflag
+    repoURl: myflagacr3210.azurecr.io
+    replicaNo: 3
   jobs:
-  - job: Deploy
+  - deployment: Deploy
     displayName: DeploytoAKS
+    environment: 'k8sflag.default'
     pool:
       vmImage: ubuntu-latest
+    strategy:
+     runOnce:
+       deploy:
+         
     ## Download the artifacts from publish artifiacts stage named "artifacts" and saved it in temp folder named manifests
-    steps:
-    - task: DownloadPipelineArtifact@2
-      inputs:
-        buildType: 'current'
-        artifactName: 'manifests'
-        targetPath: '$(Pipeline.Workspace)/manifests'
-    - task: KubernetesManifest@0
-      inputs:
-        action: 'createSecret'
-        kubernetesServiceConnection: 'flagaks'
-        namespace: 'default'
-        secretType: 'dockerRegistry'
-        secretName: '$(arcsecret)'
-        dockerRegistryEndpoint: 'flagACR'
-    
-    ## deploy the yaml kubernetes files with the use of the artifacts
-    - task: KubernetesManifest@0
-      inputs:
-        action: 'deploy'
-        kubernetesServiceConnection: 'flagaks'
-        namespace: 'default'
-        manifests: |
-          $(Pipeline.Workspace)/manifests/deployment.yml
-          $(Pipeline.Workspace)/manifests/service.yml
-
+        steps:
+        - task: DownloadPipelineArtifact@2
+          inputs:
+            buildType: 'current'
+            artifactName: 'manifests'
+            targetPath: '$(Pipeline.Workspace)/manifests'
+        - task: KubernetesManifest@0
+          inputs:
+            action: 'createSecret'
+            namespace: 'default'
+            secretType: 'dockerRegistry'
+            secretName: '$(arcsecret)'
+            dockerRegistryEndpoint: 'flagACR'
+          
+        - task: replacetokens@5
+          inputs:
+            rootDirectory: '$(Pipeline.Workspace)/manifests/'
+            targetFiles: 'deployment.yml'
+            encoding: 'auto'
+            tokenPattern: 'custom'
+            tokenPrefix: '#'
+            tokenSuffix: '#'
+            writeBOM: true
+            actionOnMissing: 'warn'
+            keepToken: false
+            actionOnNoFiles: 'continue'
+            enableTransforms: false
+            enableRecursion: false
+            useLegacyPattern: false
+            enableTelemetry: true
+        
+        ## deploy the yaml kubernetes files with the use of the artifacts
+        - task: KubernetesManifest@0
+          inputs:
+            action: 'deploy'
+            namespace: 'default'
+            manifests: |
+              $(Pipeline.Workspace)/manifests/deployment.yml
+              $(Pipeline.Workspace)/manifests/service.yml
+            containers: '$(repoURL)/$(imageRepo)/$(tag)'
 
